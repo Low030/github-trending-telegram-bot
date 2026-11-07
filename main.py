@@ -1,6 +1,7 @@
 import os
 import json
 import time
+import base64
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -65,76 +66,88 @@ def get_github_trending_repos(token: str, days: int = 30, min_stars: int = 50) -
         return []
 
 
+def get_repo_readme(full_name: str, token: str) -> str:
+    """获取仓库 README 内容的前 1500 个字符，辅助 AI 理解完整项目"""
+    url = f"https://api.github.com/repos/{full_name}/readme"
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "Authorization": f"Bearer {token}",
+        "X-GitHub-Api-Version": "2022-11-28"
+    }
+    try:
+        resp = requests.get(url, headers=headers, timeout=15)
+        if resp.status_code == 200:
+            content_b64 = resp.json().get("content", "")
+            readme_text = base64.b64decode(content_b64).decode("utf-8", errors="ignore")
+            # 截取前 1500 个字符
+            return readme_text[:1500]
+    except Exception as e:
+        print(f"[Warn] 获取 README 失败 ({full_name}): {e}")
+    return ""
+
+
 def build_fallback_message(repo: dict) -> str:
-    """严格按无引用块、全中文排版生成降级文案"""
+    """降级文案模板"""
     name = repo.get("full_name", "unknown")
     html_url = repo.get("html_url", "")
     description = (repo.get("description") or "一个值得关注的开源项目").strip()
     stars = repo.get("stargazers_count", 0)
     language = repo.get("language") or "Unknown"
 
-    if len(description) > 120:
-        description = description[:117] + "..."
-
     return (
         f"🚀 **{name}**\n"
-        f"近期热门精选开源项目\n\n"
+        f"近期热门开源项目推荐\n\n"
         f"🏷 标签：#{language} #OpenSource #GitHub\n\n"
         f"⭐ Star 数：{stars}\n\n"
         f"🟢 **项目介绍：**\n"
-        f"{description}\n\n"
+        f"- {description}\n\n"
         f"🖥 [点击查看项目源码]({html_url})\n\n"
         f"**野火 @YeHuoShare**"
     )
 
 
-def generate_telegram_message(repo: dict, client: OpenAI) -> str:
-    """使用 GitHub Models 按无引用块、纯中文排版生成 Telegram 文案"""
+def generate_telegram_message(repo: dict, readme_snippet: str, client: OpenAI) -> str:
+    """使用 GitHub Models 按全中文排版生成 Telegram 文案"""
     name = repo.get("full_name", "")
     html_url = repo.get("html_url", "")
-    description = repo.get("description") or "暂无描述"
+    description = repo.get("description") or "暂无详细描述"
     stars = repo.get("stargazers_count", 0)
     language = repo.get("language") or "Unknown"
-    created_at = repo.get("created_at", "")[:10]
 
-    prompt = f"""你是一位专业的开源项目推荐编辑。请严格根据以下排版格式，将提供的英文项目信息**完整翻译并用流畅的中文进行总结和润色**。绝对不要直接照抄英文原文，也不要加任何引用符号（>）。
+    prompt = f"""你是一位专业的开源项目推荐编辑。请根据提供的 GitHub 项目信息及 README 摘要，用流畅、通顺的中文总结出一篇 Telegram 推荐文案。
 
-【必须严格遵守的排版格式】（请原样输出，不要增减结构）：
+必须严格遵守以下排版结构（绝对不要在介绍段落前添加 > 符号，不要包含多余开场白）：
 
 🚀 **项目名称**
-简短亮点
+一句话简短亮点（中文）
 
 🏷 标签：#标签1 #标签2 #标签3
 
-⭐ Star 数：数字
+⭐ Star 数：{stars}
 
 🟢 **项目介绍：**
-用精炼、吸引人的中文分点或段落详细描述项目的核心功能、解决的痛点及适用场景。
+- 详细介绍 1（中文）
+- 详细介绍 2（中文）
+- 详细介绍 3（中文）
 
-🖥 [点击查看项目源码](项目真实链接)
+🖥 [点击查看项目源码]({html_url})
 
 **野火 @YeHuoShare**
----
 
-【项目真实信息】：
-- 完整名称：{name}
-- 项目地址：{html_url}
-- Star 数：{stars}
+---
+【项目原始信息】：
+- 项目完整名称：{name}
 - 主要语言：{language}
-- 创建时间：{created_at}
+- Star 数量：{stars}
 - 官方描述：{description}
+- README 核心摘要片段：
+{readme_snippet if readme_snippet else "无"}
 
 【写作要求】：
-1. 第一行：用 🚀 开头，项目名称加粗（**名称**）。第二行写一句吸引人的简短亮点（纯中文）。
-2. 🏷标签：后面跟 3 个相关的中文/英文 #标签。
-3. ⭐ Star 数：后面跟实际数字 {stars}。
-4. 🟢 **项目介绍：** 下方直接写内容（**绝对不要加 `>` 引用符号**），必须把英文翻译并总结为 2~4 行高质量的流畅中文。
-5. 项目地址行必须写成：🖥 [点击查看项目源码]({html_url})
-6. 最后固定写：**野火 @YeHuoShare**
-7. 只输出最终文案，不要任何多余说明或开场白。
-8. 控制在 350 字以内。
-
-请直接输出最终文案："""
+1. 介绍部分必须结合 README 摘要和官方描述，用【纯中文】深入浅出地解释该项目的功能、用途或解决的问题，写 2~4 个清晰的分点（- 开头）。
+2. 绝对不要直接照抄英文原文，绝对不要出现英文截断符号（...）。
+3. 必须包含标题的 🚀、🏷 标签、⭐ Star 数、🟢 **项目介绍：**、🖥 [点击查看项目源码]({html_url}) 以及底部落款 **野火 @YeHuoShare**。
+4. 只输出排版好的最终文案："""
 
     try:
         response = client.chat.completions.create(
@@ -142,12 +155,12 @@ def generate_telegram_message(repo: dict, client: OpenAI) -> str:
             messages=[
                 {
                     "role": "system",
-                    "content": "你是一位专业的开源项目推荐编辑。你必须严格按照用户给出的排版格式输出纯中文文案，绝不使用引用符号（>），绝不直接照抄英文。"
+                    "content": "你是一位专业的开源技术编辑。你的任务是阅读开源项目的英文信息并用高质量的中文编写 Telegram 推荐文案，绝不使用引用符号 >，绝不直接复制英文截断描述。"
                 },
                 {"role": "user", "content": prompt}
             ],
             temperature=0.7,
-            max_tokens=500
+            max_tokens=600
         )
 
         content = None
@@ -156,28 +169,18 @@ def generate_telegram_message(repo: dict, client: OpenAI) -> str:
             msg = getattr(choice, "message", None)
             if msg is not None:
                 content = getattr(msg, "content", None)
-            if content is None and isinstance(choice, dict):
-                content = choice.get("message", {}).get("content")
-        elif isinstance(response, dict):
-            content = (
-                response.get("choices", [{}])[0]
-                .get("message", {})
-                .get("content")
-            )
-        elif isinstance(response, str):
-            content = response
 
         if content and isinstance(content, str):
             content = content.strip()
-            # 确保没有输出引用符号
-            content = content.replace("> ", "")
-            if len(content) >= 80 and "OK" != content.upper() and "🚀" in content:
-                print("[Info] AI 生成文案成功")
+            # 清除可能意外残留的引用符号
+            content = content.replace("> ", "").replace(">", "")
+            if len(content) >= 60 and "🚀" in content:
+                print("[Info] AI 生成中文文案成功")
                 return content
             else:
-                print(f"[Warn] AI 返回内容无效或过短，改用降级模板。内容预览: {content[:50]!r}")
+                print(f"[Warn] AI 返回内容未通过校验，改用降级模板。预览: {content[:60]!r}")
         else:
-            print(f"[Warn] AI 返回结构异常，改用降级模板。type={type(response)}")
+            print("[Warn] AI 返回结构异常，改用降级模板。")
 
     except Exception as e:
         print(f"[Error] AI 生成文案失败: {e}")
@@ -244,9 +247,14 @@ def main():
         full_name = repo.get("full_name", "unknown")
         print(f"\n正在处理: {full_name} (⭐ {repo.get('stargazers_count', 0)})")
 
-        message = generate_telegram_message(repo, client)
+        # 1. 抓取 README 文本片断
+        readme_snippet = get_repo_readme(full_name, GH_TOKEN)
+
+        # 2. 生成中文 AI 文案
+        message = generate_telegram_message(repo, readme_snippet, client)
         print("生成文案预览:\n", message[:300], "...")
 
+        # 3. 发送至 Telegram
         success = send_telegram_message(TELEGRAM_BOT_TOKEN, TELEGRAM_CHANNEL_ID, message)
         if success:
             pushed_ids.add(repo_id)
