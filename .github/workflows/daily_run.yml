@@ -2,47 +2,50 @@ name: Daily GitHub Trending Push
 
 on:
   schedule:
-    # 每天 UTC 01:00 运行（北京时间 09:00）
-    - cron: "0 1 * * *"
-  workflow_dispatch:  # 支持手动触发
+    # UTC 时间 01:00 运行（对应北京/马来西亚时间每天早上 09:00）
+    - cron: '0 1 * * *'
+  # 保留手动触发按钮，方便随时在 GitHub Actions 页面进行调试
+  workflow_dispatch:
 
+# 赋予 GitHub Actions 自动 Git Commit/Push 的写权限
 permissions:
   contents: write
 
 jobs:
-  push-trending:
+  run-bot:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      # 1. 拉取仓库代码
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Set up Python 3.10
+      # 2. 设置 Python 环境
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.10"
+          python-version: '3.10'
 
-      - name: Install dependencies
+      # 3. 安装依赖
+      - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
-      - name: Run main script
+      # 4. 运行 Python 主脚本
+      - name: Run Main Script
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
-        run: python main.py
-
-      - name: Commit and push history
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          python main.py
+
+      # 5. 自动提交并保存去重文件 pushed_history.json 回仓库
+      - name: Save Pushed History Back to Repo
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action Bot"
           git add pushed_history.json
-          if git diff --staged --quiet; then
-            echo "No changes to commit"
-          else
-            git commit -m "chore: update pushed_history.json [skip ci]"
-            git pull --rebase origin main || true
-            git push
-          fi
+          git commit -m "Auto-update pushed history [skip ci]" || echo "No changes to commit"
+          git push || echo "No changes to push"
