@@ -66,7 +66,7 @@ def get_github_trending_repos(token: str, days: int = 30, min_stars: int = 50) -
 
 
 def generate_telegram_message(repo: dict, client: OpenAI) -> str:
-    """使用 GitHub Models (gpt-4o-mini) 按指定排版生成 Telegram 文案"""
+    """使用 GitHub Models 按指定排版生成 Telegram 文案"""
     name = repo.get("full_name", "")
     html_url = repo.get("html_url", "")
     description = repo.get("description") or "暂无描述"
@@ -111,7 +111,7 @@ def generate_telegram_message(repo: dict, client: OpenAI) -> str:
 
     try:
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="openai/gpt-4o-mini",
             messages=[
                 {
                     "role": "system",
@@ -122,21 +122,38 @@ def generate_telegram_message(repo: dict, client: OpenAI) -> str:
             temperature=0.65,
             max_tokens=500
         )
-        content = response.choices[0].message.content.strip()
-        return content
+
+        # 兼容不同 SDK / API 返回结构
+        content = None
+        if hasattr(response, "choices") and response.choices:
+            choice = response.choices[0]
+            if hasattr(choice, "message") and hasattr(choice.message, "content"):
+                content = choice.message.content
+            elif isinstance(choice, dict):
+                content = choice.get("message", {}).get("content")
+        elif isinstance(response, dict):
+            content = response.get("choices", [{}])[0].get("message", {}).get("content")
+        elif isinstance(response, str):
+            content = response
+
+        if content and isinstance(content, str) and content.strip():
+            return content.strip()
+
+        print(f"[Warn] AI 返回内容为空或格式异常，使用降级文案。response type: {type(response)}")
     except Exception as e:
         print(f"[Error] AI 生成文案失败: {e}")
-        # 降级方案，严格对齐排版
-        return (
-            f"✅**{name}** | 近期热门开源项目\n"
-            f"🏷标签：#{language} #OpenSource #GitHub\n"
-            f"🟢介绍：\n"
-            f"- {description}\n"
-            f"⭐ Stars: {stars} | 💻 Language: {language}\n"
-            f"🖥 {html_url}\n"
-            f"**野火 @YeHuoShare**\n"
-            f"---"
-        )
+
+    # 降级方案，严格对齐排版
+    return (
+        f"✅**{name}** | 近期热门开源项目\n"
+        f"🏷标签：#{language} #OpenSource #GitHub\n"
+        f"🟢介绍：\n"
+        f"- {description}\n"
+        f"⭐ Stars: {stars} | 💻 Language: {language}\n"
+        f"🖥 {html_url}\n"
+        f"**野火 @YeHuoShare**\n"
+        f"---"
+    )
 
 
 def send_telegram_message(token: str, chat_id: str, text: str) -> bool:
@@ -200,7 +217,7 @@ def main():
         print(f"\n正在处理: {full_name} (⭐ {repo.get('stargazers_count', 0)})")
 
         message = generate_telegram_message(repo, client)
-        print("生成文案预览:\n", message[:250], "...")
+        print("生成文案预览:\n", message[:280], "...")
 
         success = send_telegram_message(TELEGRAM_BOT_TOKEN, TELEGRAM_CHANNEL_ID, message)
         if success:
