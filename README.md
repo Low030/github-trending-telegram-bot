@@ -20,7 +20,7 @@
 |-------------|------|
 | `TELEGRAM_BOT_TOKEN` | Telegram Bot Token（从 @BotFather 获取） |
 | `TELEGRAM_CHANNEL_ID` | 目标频道 ID（例如 `-100xxxxxxxxxx`） |
-| `GITHUB_TOKEN` | 你的 GitHub Personal Access Token（需要 `models:read` 权限，用于调用 GitHub Models） |
+| `GH_TOKEN` | 你的 GitHub Personal Access Token（需要 `models:read` 权限，用于调用 GitHub Models） |
 
 ### 2. 启用 GitHub Actions
 
@@ -45,5 +45,5 @@
 ## 注意事项
 
 - GitHub Models 免费额度有限，请合理使用
-- 确保 GITHUB_TOKEN 拥有 `models:read` 权限
+- 确保 `GH_TOKEN` 拥有 `models:read` 权限
 - 首次运行会推送符合条件的项目，之后根据历史去重

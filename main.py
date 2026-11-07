@@ -10,7 +10,7 @@ from openai import OpenAI
 # ==================== 配置 ====================
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHANNEL_ID = os.getenv("TELEGRAM_CHANNEL_ID")
-GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
+GH_TOKEN = os.getenv("GH_TOKEN")
 
 HISTORY_FILE = Path("pushed_history.json")
 MAX_PUSH_PER_RUN = 2
@@ -150,8 +150,8 @@ def send_telegram_message(token: str, chat_id: str, text: str) -> bool:
 
 # ==================== 主逻辑 ====================
 def main():
-    if not all([TELEGRAM_BOT_TOKEN, TELEGRAM_CHANNEL_ID, GITHUB_TOKEN]):
-        print("[Error] 缺少必要环境变量：TELEGRAM_BOT_TOKEN / TELEGRAM_CHANNEL_ID / GITHUB_TOKEN")
+    if not all([TELEGRAM_BOT_TOKEN, TELEGRAM_CHANNEL_ID, GH_TOKEN]):
+        print("[Error] 缺少必要环境变量：TELEGRAM_BOT_TOKEN / TELEGRAM_CHANNEL_ID / GH_TOKEN")
         return
 
     print("=== GitHub 热门开源项目推送机器人 开始运行 ===")
@@ -160,7 +160,7 @@ def main():
     # 初始化 OpenAI 客户端（指向 GitHub Models）
     client = OpenAI(
         base_url="https://models.github.ai/inference",
-        api_key=GITHUB_TOKEN
+        api_key=GH_TOKEN
     )
 
     # 加载历史记录
@@ -168,7 +168,7 @@ def main():
     print(f"已推送历史项目数: {len(pushed_ids)}")
 
     # 获取候选仓库
-    repos = get_github_trending_repos(GITHUB_TOKEN, days=DAYS_AGO, min_stars=MIN_STARS)
+    repos = get_github_trending_repos(GH_TOKEN, days=DAYS_AGO, min_stars=MIN_STARS)
     print(f"获取到候选仓库数: {len(repos)}")
 
     pushed_count = 0
