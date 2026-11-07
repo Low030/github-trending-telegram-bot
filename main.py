@@ -93,38 +93,40 @@ def generate_telegram_message(repo: dict, readme_snippet: str, client: OpenAI) -
     stars = repo.get("stargazers_count", 0)
     language = repo.get("language") or "Unknown"
 
-    prompt = f"""你是一位专业的中文开源技术编辑。请阅读提供的 GitHub 项目英文信息，并将其【完全重构并翻译为地道的中文】 Telegram 推荐文案。
+prompt = f"""你是一位极具洞察力的开源技术编辑。请阅读 GitHub 项目的英文信息，精炼提炼出它的【核心技术突破与痛点解决方案】，并用流畅地道的中文重新撰写推荐文案。
 
-严禁照抄英文原文！正文介绍部分绝对不要出现英文截断符号（...），绝对不能包含 `>` 引用符号。
+【绝对禁令】：
+1. 严禁照抄英文描述！不要出现英文截断符号（...）。
+2. 绝对不能输出泛泛而谈的话（如“该项目拥有较高关注度”这种废话）。
+3. 必须精准指出该项目的核心突破（例如：解决什么痛点、用了什么硬核技术、性能有何提升）。
 
-【输出标准排版】：
+【输出排版格式】：
 
 🚀 **{name}**
-用一句话中文总结这个项目最核心的亮点
+用一句话中文炸裂总结该项目的核心黑科技
 
 🏷 标签：#{language} #开源推荐 #GitHub热门
 
 ⭐ Star 数：{stars}
 
 🟢 **项目介绍：**
-- 详细介绍点 1（必须全部为高质量中文，介绍具体功能）
-- 详细介绍点 2（必须全部为高质量中文，介绍适用场景）
-- 详细介绍点 3（必须全部为高质量中文，介绍技术优势）
+- 核心突破：详细说明项目本质（如：并非模拟器，而是利用同架构原生重构代码/API等）。
+- 性能优势：说明实际体验提升（如：帧率、画质、渲染效率改善）。
+- 适用场景：支持的平台与运行方式。
 
 🖥 [点击查看项目源码]({html_url})
 
 **野火 @YeHuoShare**
 
 ---
-【参考原始信息】：
+【项目原始资料】：
 - 项目名称：{name}
 - 编程语言：{language}
 - Star 数：{stars}
-- 官方描述（英文）：{description}
-- README 核心摘要片段：
-{readme_snippet if readme_snippet else "无额外 README"}
+- 官方描述：{description}
+- README 片段：{readme_snippet}
 
-请直接输出排版好的中文文案（不要有任何前言或总结话术）："""
+请直接输出最终排版好的中文文案："""
 
     try:
         response = client.chat.completions.create(
