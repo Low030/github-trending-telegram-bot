@@ -66,7 +66,7 @@ def get_github_trending_repos(token: str, days: int = 30, min_stars: int = 50) -
 
 
 def build_fallback_message(repo: dict) -> str:
-    """严格按最新指定排版生成降级文案"""
+    """严格按无引用块、全中文排版生成降级文案"""
     name = repo.get("full_name", "unknown")
     html_url = repo.get("html_url", "")
     description = (repo.get("description") or "一个值得关注的开源项目").strip()
@@ -82,14 +82,14 @@ def build_fallback_message(repo: dict) -> str:
         f"🏷 标签：#{language} #OpenSource #GitHub\n\n"
         f"⭐ Star 数：{stars}\n\n"
         f"🟢 **项目介绍：**\n"
-        f"> {description}\n\n"
+        f"{description}\n\n"
         f"🖥 [点击查看项目源码]({html_url})\n\n"
         f"**野火 @YeHuoShare**"
     )
 
 
 def generate_telegram_message(repo: dict, client: OpenAI) -> str:
-    """使用 GitHub Models 按指定排版生成 Telegram 文案，失败则使用降级模板"""
+    """使用 GitHub Models 按无引用块、纯中文排版生成 Telegram 文案"""
     name = repo.get("full_name", "")
     html_url = repo.get("html_url", "")
     description = repo.get("description") or "暂无描述"
@@ -97,7 +97,7 @@ def generate_telegram_message(repo: dict, client: OpenAI) -> str:
     language = repo.get("language") or "Unknown"
     created_at = repo.get("created_at", "")[:10]
 
-    prompt = f"""你是一位专业的开源项目推荐编辑。请严格根据以下排版格式，为这个 GitHub 项目生成 Telegram 推荐文案。
+    prompt = f"""你是一位专业的开源项目推荐编辑。请严格根据以下排版格式，将提供的英文项目信息**完整翻译并用流畅的中文进行总结和润色**。绝对不要直接照抄英文原文，也不要加任何引用符号（>）。
 
 【必须严格遵守的排版格式】（请原样输出，不要增减结构）：
 
@@ -109,7 +109,7 @@ def generate_telegram_message(repo: dict, client: OpenAI) -> str:
 ⭐ Star 数：数字
 
 🟢 **项目介绍：**
-> 用精炼、吸引人的中文分点或段落详细描述项目的核心功能、解决的痛点及适用场景。
+用精炼、吸引人的中文分点或段落详细描述项目的核心功能、解决的痛点及适用场景。
 
 🖥 [点击查看项目源码](项目真实链接)
 
@@ -125,10 +125,10 @@ def generate_telegram_message(repo: dict, client: OpenAI) -> str:
 - 官方描述：{description}
 
 【写作要求】：
-1. 第一行：用 🚀 开头，项目名称加粗（**名称**）。第二行写一句吸引人的简短亮点。
+1. 第一行：用 🚀 开头，项目名称加粗（**名称**）。第二行写一句吸引人的简短亮点（纯中文）。
 2. 🏷标签：后面跟 3 个相关的中文/英文 #标签。
 3. ⭐ Star 数：后面跟实际数字 {stars}。
-4. 🟢 **项目介绍：** 下方必须使用 Markdown 引用语法 `>`，写 2~4 行高质量的中文介绍。
+4. 🟢 **项目介绍：** 下方直接写内容（**绝对不要加 `>` 引用符号**），必须把英文翻译并总结为 2~4 行高质量的流畅中文。
 5. 项目地址行必须写成：🖥 [点击查看项目源码]({html_url})
 6. 最后固定写：**野火 @YeHuoShare**
 7. 只输出最终文案，不要任何多余说明或开场白。
@@ -142,7 +142,7 @@ def generate_telegram_message(repo: dict, client: OpenAI) -> str:
             messages=[
                 {
                     "role": "system",
-                    "content": "你是一位专业的开源项目推荐编辑。你必须严格按照用户给出的排版格式输出，绝不添加额外内容，也不要只回复 OK。"
+                    "content": "你是一位专业的开源项目推荐编辑。你必须严格按照用户给出的排版格式输出纯中文文案，绝不使用引用符号（>），绝不直接照抄英文。"
                 },
                 {"role": "user", "content": prompt}
             ],
@@ -169,6 +169,8 @@ def generate_telegram_message(repo: dict, client: OpenAI) -> str:
 
         if content and isinstance(content, str):
             content = content.strip()
+            # 确保没有输出引用符号
+            content = content.replace("> ", "")
             if len(content) >= 80 and "OK" != content.upper() and "🚀" in content:
                 print("[Info] AI 生成文案成功")
                 return content
