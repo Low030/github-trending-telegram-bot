@@ -2,6 +2,7 @@ import os
 import json
 import time
 import base64
+import traceback
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -25,7 +26,8 @@ def load_history() -> set:
             with open(HISTORY_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 return set(data.get("pushed_ids", []))
-        except Exception:
+        except Exception as e:
+            print(f"[Warn] 读取历史记录失败: {e}")
             return set()
     return set()
 
@@ -67,7 +69,7 @@ def get_github_trending_repos(token: str, days: int = 30, min_stars: int = 50) -
 
 
 def get_repo_readme(full_name: str, token: str) -> str:
-    """获取仓库 README 内容的前 1500 个字符"""
+    """获取仓库 README 内容的前 2000 个字符，辅助 AI 抓取技术深度"""
     url = f"https://api.github.com/repos/{full_name}/readme"
     headers = {
         "Accept": "application/vnd.github+json",
@@ -79,40 +81,41 @@ def get_repo_readme(full_name: str, token: str) -> str:
         if resp.status_code == 200:
             content_b64 = resp.json().get("content", "")
             readme_text = base64.b64decode(content_b64).decode("utf-8", errors="ignore")
-            return readme_text[:1500]
+            return readme_text[:2000]
     except Exception as e:
         print(f"[Warn] 获取 README 失败 ({full_name}): {e}")
     return ""
 
 
 def generate_telegram_message(repo: dict, readme_snippet: str, client: OpenAI) -> str:
-    """使用 GitHub Models 按全中文排版生成 Telegram 文案"""
+    """使用 GitHub Models 生成深度硬核技术中文推荐文案"""
     name = repo.get("full_name", "")
     html_url = repo.get("html_url", "")
     description = repo.get("description") or "暂无详细描述"
     stars = repo.get("stargazers_count", 0)
     language = repo.get("language") or "Unknown"
 
-prompt = f"""你是一位极具洞察力的开源技术编辑。请阅读 GitHub 项目的英文信息，精炼提炼出它的【核心技术突破与痛点解决方案】，并用流畅地道的中文重新撰写推荐文案。
+    prompt = f"""你是一位极具专业洞察力的开源技术记者。请阅读提供的 GitHub 项目英文资料，深入提炼其【核心技术突破、底层原理与核心亮点】，用流畅地道的中文重新撰写 Telegram 推荐文案。
 
-【绝对禁令】：
-1. 严禁照抄英文描述！不要出现英文截断符号（...）。
-2. 绝对不能输出泛泛而谈的话（如“该项目拥有较高关注度”这种废话）。
-3. 必须精准指出该项目的核心突破（例如：解决什么痛点、用了什么硬核技术、性能有何提升）。
+【严禁规则】：
+1. 绝对禁止照抄英文原文，绝对禁止使用英文截断符（...）。
+2. 绝对不能输出空洞套话（例如“该项目拥有较高关注度”、“值得关注”等废话）。
+3. 必须提炼出实质技术点：例如是“原生重构而非模拟器”、“利用物理架构优化”、“大幅提升帧率/渲染效率”等硬核核心。
+4. 绝对不要在正文段落前加 `>` 符号。
 
-【输出排版格式】：
+【固定输出格式】：
 
 🚀 **{name}**
-用一句话中文炸裂总结该项目的核心黑科技
+用一句话中文炸裂总结该项目的核心黑科技与本质突破
 
 🏷 标签：#{language} #开源推荐 #GitHub热门
 
 ⭐ Star 数：{stars}
 
 🟢 **项目介绍：**
-- 核心突破：详细说明项目本质（如：并非模拟器，而是利用同架构原生重构代码/API等）。
-- 性能优势：说明实际体验提升（如：帧率、画质、渲染效率改善）。
-- 适用场景：支持的平台与运行方式。
+- 核心突破：精准说明项目原理与底层技术创新（如：非模拟器、架构直出、API转译等）。
+- 关键优势：性能、画质或效率的具体提升效果。
+- 适用场景：支持的设备环境或使用方式。
 
 🖥 [点击查看项目源码]({html_url})
 
@@ -120,13 +123,14 @@ prompt = f"""你是一位极具洞察力的开源技术编辑。请阅读 GitHub
 
 ---
 【项目原始资料】：
-- 项目名称：{name}
-- 编程语言：{language}
+- 项目完整名称：{name}
+- 主要语言：{language}
 - Star 数：{stars}
 - 官方描述：{description}
-- README 片段：{readme_snippet}
+- README 核心片段：
+{readme_snippet if readme_snippet else "无"}
 
-请直接输出最终排版好的中文文案："""
+请直接输出排版好的中文文案（不要包含任何思考过程或开场白）："""
 
     try:
         response = client.chat.completions.create(
@@ -134,12 +138,12 @@ prompt = f"""你是一位极具洞察力的开源技术编辑。请阅读 GitHub
             messages=[
                 {
                     "role": "system",
-                    "content": "你是一位优秀的开源项目中文推荐编辑。你唯一的任务是输出纯中文润色的文案，绝不使用 > 符号，绝不复制英文原句。"
+                    "content": "你是一位优秀的硬核开源技术编辑。你唯一的任务是输出高质量中文技术提炼文案，绝不包含通用废话，绝不包含 > 符号。"
                 },
                 {"role": "user", "content": prompt}
             ],
             temperature=0.7,
-            max_tokens=600
+            max_tokens=700
         )
 
         content = None
@@ -151,50 +155,63 @@ prompt = f"""你是一位极具洞察力的开源技术编辑。请阅读 GitHub
 
         if content and isinstance(content, str):
             content = content.strip().replace("> ", "").replace(">", "")
-            print("[Info] AI 生成中文文案成功！")
+            print(f"[Info] AI 成功为 {name} 生成深度中文文案！")
             return content
 
     except Exception as e:
-        print(f"[Error] AI 生成文案失败: {e}")
+        print(f"[Error] AI 生成文案发生异常: {e}")
+        traceback.print_exc()
 
-    # 保底输出逻辑（也做中文处理）
+    # 安全保底输出（包含基本中文翻译指导）
     return (
         f"🚀 **{name}**\n"
-        f"近期热门开源项目推荐\n\n"
+        f"热门 GitHub 开源技术项目\n\n"
         f"🏷 标签：#{language} #开源推荐 #GitHub\n\n"
         f"⭐ Star 数：{stars}\n\n"
         f"🟢 **项目介绍：**\n"
-        f"- 该项目目前拥有较高关注度，主语言为 {language}。\n"
-        f"- 官方描述：{description}\n\n"
+        f"- 关键功能：{description}\n"
+        f"- 主要开发语言：{language}\n\n"
         f"🖥 [点击查看项目源码]({html_url})\n\n"
         f"**野火 @YeHuoShare**"
     )
 
 
 def send_telegram_message(token: str, chat_id: str, text: str) -> bool:
-    """通过 Telegram Bot API 发送 Markdown 消息"""
+    """通过 Telegram Bot API 发送消息，具备强大的语法容错机制"""
     url = f"https://api.telegram.org/bot{token}/sendMessage"
-    payload = {
+    
+    # 尝试 1：优先用 Markdown 格式发送
+    payload_md = {
         "chat_id": chat_id,
         "text": text,
         "parse_mode": "Markdown",
         "disable_web_page_preview": False
     }
+    
     try:
-        resp = requests.post(url, json=payload, timeout=20)
+        resp = requests.post(url, json=payload_md, timeout=20)
         if resp.status_code == 200:
-            print("[Success] 消息已推送到 Telegram")
+            print("[Success] 消息已成功推送到 Telegram (Markdown 模式)")
             return True
         else:
-            print(f"[Error] Telegram 发送失败: {resp.status_code} - {resp.text}")
-            payload["parse_mode"] = None
-            resp2 = requests.post(url, json=payload, timeout=20)
-            if resp2.status_code == 200:
-                print("[Success] 以纯文本模式重新发送成功")
+            print(f"[Warn] Telegram Markdown 发送失败 ({resp.status_code}): {resp.text}")
+            
+            # 尝试 2：如果 Markdown 报语法错误，降级为纯文本模式发送，防止程序报错崩溃
+            payload_plain = {
+                "chat_id": chat_id,
+                "text": text,
+                "disable_web_page_preview": False
+            }
+            resp_plain = requests.post(url, json=payload_plain, timeout=20)
+            if resp_plain.status_code == 200:
+                print("[Success] 消息以纯文本模式重新发送成功")
                 return True
-            return False
+            else:
+                print(f"[Error] 纯文本模式发送也失败: {resp_plain.text}")
+                return False
     except Exception as e:
-        print(f"[Error] Telegram 请求异常: {e}")
+        print(f"[Error] Telegram 请求发送异常: {e}")
+        traceback.print_exc()
         return False
 
 
@@ -207,48 +224,55 @@ def main():
     print("=== GitHub 热门开源项目推送机器人 开始运行 ===")
     print(f"时间: {datetime.now(timezone.utc).isoformat()}")
 
-    client = OpenAI(
-        base_url="https://models.github.ai/inference",
-        api_key=GH_TOKEN
-    )
+    try:
+        client = OpenAI(
+            base_url="https://models.github.ai/inference",
+            api_key=GH_TOKEN
+        )
 
-    pushed_ids = load_history()
-    print(f"已推送历史项目数: {len(pushed_ids)}")
+        pushed_ids = load_history()
+        print(f"已推送历史项目数: {len(pushed_ids)}")
 
-    repos = get_github_trending_repos(GH_TOKEN, days=DAYS_AGO, min_stars=MIN_STARS)
-    print(f"获取到候选仓库数: {len(repos)}")
+        repos = get_github_trending_repos(GH_TOKEN, days=DAYS_AGO, min_stars=MIN_STARS)
+        print(f"获取到候选仓库数: {len(repos)}")
 
-    pushed_count = 0
-    for repo in repos:
-        if pushed_count >= MAX_PUSH_PER_RUN:
-            break
+        pushed_count = 0
+        for repo in repos:
+            if pushed_count >= MAX_PUSH_PER_RUN:
+                break
 
-        repo_id = str(repo.get("id"))
-        if not repo_id or repo_id in pushed_ids:
-            continue
+            repo_id = str(repo.get("id"))
+            if not repo_id or repo_id in pushed_ids:
+                continue
 
-        full_name = repo.get("full_name", "unknown")
-        print(f"\n正在处理: {full_name} (⭐ {repo.get('stargazers_count', 0)})")
+            full_name = repo.get("full_name", "unknown")
+            print(f"\n正在处理项目: {full_name} (⭐ {repo.get('stargazers_count', 0)})")
 
-        # 1. 抓取 README 文本
-        readme_snippet = get_repo_readme(full_name, GH_TOKEN)
+            # 1. 获取 README 原文辅助 AI
+            readme_snippet = get_repo_readme(full_name, GH_TOKEN)
 
-        # 2. 生成中文 AI 文案
-        message = generate_telegram_message(repo, readme_snippet, client)
-        print("生成文案预览:\n", message[:300], "...")
+            # 2. 生成深度中文 AI 文案
+            message = generate_telegram_message(repo, readme_snippet, client)
+            print("--- 文案生成预览 ---")
+            print(message)
+            print("-------------------")
 
-        # 3. 推送到 Telegram
-        success = send_telegram_message(TELEGRAM_BOT_TOKEN, TELEGRAM_CHANNEL_ID, message)
-        if success:
-            pushed_ids.add(repo_id)
-            pushed_count += 1
-            time.sleep(2)
-        else:
-            print(f"跳过推送失败的项目: {full_name}")
+            # 3. 发送至 Telegram
+            success = send_telegram_message(TELEGRAM_BOT_TOKEN, TELEGRAM_CHANNEL_ID, message)
+            if success:
+                pushed_ids.add(repo_id)
+                pushed_count += 1
+                time.sleep(2)
+            else:
+                print(f"[Skip] 发送失败，跳过记录: {full_name}")
 
-    save_history(pushed_ids)
-    print(f"\n本次成功推送 {pushed_count} 个项目")
-    print("=== 运行结束 ===")
+        save_history(pushed_ids)
+        print(f"\n本次成功推送 {pushed_count} 个项目")
+        print("=== 运行结束 ===")
+
+    except Exception as e:
+        print(f"[Fatal Error] 主程序运行异常: {e}")
+        traceback.print_exc()
 
 
 if __name__ == "__main__":
