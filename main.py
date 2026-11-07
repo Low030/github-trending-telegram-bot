@@ -65,8 +65,33 @@ def get_github_trending_repos(token: str, days: int = 30, min_stars: int = 50) -
         return []
 
 
+def build_fallback_message(repo: dict) -> str:
+    """严格按指定排版生成降级文案"""
+    name = repo.get("full_name", "unknown")
+    html_url = repo.get("html_url", "")
+    description = (repo.get("description") or "一个值得关注的开源项目").strip()
+    stars = repo.get("stargazers_count", 0)
+    language = repo.get("language") or "Unknown"
+
+    # 简单截断描述，避免过长
+    if len(description) > 120:
+        description = description[:117] + "..."
+
+    return (
+        f"✅**{name}** | 近期热门开源项目\n"
+        f"🏷标签：#{language} #OpenSource #GitHub\n"
+        f"🟢介绍：\n"
+        f"- {description}\n"
+        f"- 当前 Star 数较高，社区关注度不错\n"
+        f"⭐ Stars: {stars} | 💻 Language: {language}\n"
+        f"🖥 {html_url}\n"
+        f"**野火 @YeHuoShare**\n"
+        f"---"
+    )
+
+
 def generate_telegram_message(repo: dict, client: OpenAI) -> str:
-    """使用 GitHub Models 按指定排版生成 Telegram 文案"""
+    """使用 GitHub Models 按指定排版生成 Telegram 文案，失败则使用降级模板"""
     name = repo.get("full_name", "")
     html_url = repo.get("html_url", "")
     description = repo.get("description") or "暂无描述"
@@ -81,9 +106,9 @@ def generate_telegram_message(repo: dict, client: OpenAI) -> str:
 ✅**项目名称** | 简短亮点一句话
 🏷标签：#标签1 #标签2 #标签3
 🟢介绍：
-- 核心功能点1（可适当内嵌项目链接）
+- 核心功能点1
 - 核心功能点2
-- 核心功能点3 或补充说明
+- 核心功能点3
 ⭐ Stars: {stars} | 💻 Language: {language}
 🖥 {html_url}
 **野火 @YeHuoShare**
@@ -99,13 +124,13 @@ def generate_telegram_message(repo: dict, client: OpenAI) -> str:
 
 【写作要求】：
 1. 第一行：用 ✅ 开头，项目名称必须加粗（**名称**），后面跟 | 和一句简短有吸引力的亮点。
-2. 第二行：🏷标签： 后面跟 3 个相关的 #标签（根据语言和项目类型生成，例如 #Python #AI #开源）。
-3. 第三行开始：🟢介绍： 然后用 2~4 个精炼的 - 分点描述项目核心功能与价值，语言专业且吸引人。
-4. 中间必须保留 ⭐ Stars 和 💻 Language 这一行（数字已给出，直接使用）。
+2. 第二行：🏷标签： 后面跟 3 个相关的 #标签。
+3. 🟢介绍： 用 2~4 个 - 分点描述项目核心功能与价值。
+4. 必须保留 ⭐ Stars 和 💻 Language 这一行。
 5. 项目地址行用 🖥 开头，直接放完整链接。
-6. 最后固定写：**野火 @YeHuoShare**（加粗），然后换行写 ---
-7. 不要输出任何多余的说明、前言或后记，只输出符合上述格式的最终文案。
-8. 整体控制在 280 字以内，适合 Telegram 阅读。
+6. 最后固定写：**野火 @YeHuoShare**，然后换行写 ---
+7. 只输出最终文案，不要任何多余说明。
+8. 控制在 280 字以内。
 
 请直接输出最终文案："""
 
@@ -115,45 +140,46 @@ def generate_telegram_message(repo: dict, client: OpenAI) -> str:
             messages=[
                 {
                     "role": "system",
-                    "content": "你是一位专业的开源项目推荐编辑。你必须严格按照用户给出的排版格式输出，绝不添加额外内容。"
+                    "content": "你是一位专业的开源项目推荐编辑。你必须严格按照用户给出的排版格式输出，绝不添加额外内容，也不要只回复 OK。"
                 },
                 {"role": "user", "content": prompt}
             ],
-            temperature=0.65,
+            temperature=0.7,
             max_tokens=500
         )
 
-        # 兼容不同 SDK / API 返回结构
         content = None
         if hasattr(response, "choices") and response.choices:
             choice = response.choices[0]
-            if hasattr(choice, "message") and hasattr(choice.message, "content"):
-                content = choice.message.content
-            elif isinstance(choice, dict):
+            msg = getattr(choice, "message", None)
+            if msg is not None:
+                content = getattr(msg, "content", None)
+            if content is None and isinstance(choice, dict):
                 content = choice.get("message", {}).get("content")
         elif isinstance(response, dict):
-            content = response.get("choices", [{}])[0].get("message", {}).get("content")
+            content = (
+                response.get("choices", [{}])[0]
+                .get("message", {})
+                .get("content")
+            )
         elif isinstance(response, str):
             content = response
 
-        if content and isinstance(content, str) and content.strip():
-            return content.strip()
+        if content and isinstance(content, str):
+            content = content.strip()
+            # 拒绝无效短回复（例如 "OK"、空内容）
+            if len(content) >= 80 and "OK" != content.upper() and "✅" in content:
+                print("[Info] AI 生成文案成功")
+                return content
+            else:
+                print(f"[Warn] AI 返回内容无效或过短，改用降级模板。内容预览: {content[:50]!r}")
+        else:
+            print(f"[Warn] AI 返回结构异常，改用降级模板。type={type(response)}")
 
-        print(f"[Warn] AI 返回内容为空或格式异常，使用降级文案。response type: {type(response)}")
     except Exception as e:
         print(f"[Error] AI 生成文案失败: {e}")
 
-    # 降级方案，严格对齐排版
-    return (
-        f"✅**{name}** | 近期热门开源项目\n"
-        f"🏷标签：#{language} #OpenSource #GitHub\n"
-        f"🟢介绍：\n"
-        f"- {description}\n"
-        f"⭐ Stars: {stars} | 💻 Language: {language}\n"
-        f"🖥 {html_url}\n"
-        f"**野火 @YeHuoShare**\n"
-        f"---"
-    )
+    return build_fallback_message(repo)
 
 
 def send_telegram_message(token: str, chat_id: str, text: str) -> bool:
@@ -217,7 +243,7 @@ def main():
         print(f"\n正在处理: {full_name} (⭐ {repo.get('stargazers_count', 0)})")
 
         message = generate_telegram_message(repo, client)
-        print("生成文案预览:\n", message[:280], "...")
+        print("生成文案预览:\n", message[:300], "...")
 
         success = send_telegram_message(TELEGRAM_BOT_TOKEN, TELEGRAM_CHANNEL_ID, message)
         if success:
