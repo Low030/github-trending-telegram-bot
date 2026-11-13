@@ -4,6 +4,7 @@ import time
 import html
 import base64
 import traceback
+import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -14,14 +15,13 @@ from openai import OpenAI
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHANNEL_ID = os.getenv("TELEGRAM_CHANNEL_ID")
 GH_TOKEN = os.getenv("GH_TOKEN")
+# 个人/频道品牌签名，从 Secrets 读取；为空则不追加
+BRAND_SIGNATURE = (os.getenv("BRAND_SIGNATURE") or "").strip()
 
 HISTORY_FILE = Path("pushed_history.json")
 MAX_PUSH_PER_RUN = 2
 MIN_STARS = 50
 DAYS_AGO = 30
-
-# Telegram 允许的 HTML 标签较有限，AI 输出后我们尽量只保留安全结构
-ALLOWED_HTML_TAGS = ("b", "strong", "i", "em", "u", "s", "code", "pre", "a")
 
 
 # ==================== 工具函数 ====================
@@ -49,7 +49,6 @@ def save_history(pushed_ids: set):
 def get_github_trending_repos(token: str, days: int = 30, min_stars: int = 50) -> list:
     """抓取近期创建且星数较高的开源项目（排除 fork）"""
     since_date = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
-    # 排除 fork，优先真正的新项目
     query = f"created:>{since_date} stars:>={min_stars} fork:false"
     url = "https://api.github.com/search/repositories"
     headers = {
@@ -95,6 +94,18 @@ def get_repo_readme(full_name: str, token: str) -> str:
     return ""
 
 
+def append_brand_signature(message: str) -> str:
+    """若配置了 BRAND_SIGNATURE，则在文案末尾追加签名（HTML 安全）"""
+    if not BRAND_SIGNATURE:
+        return message
+    # 允许签名里写简单 HTML（如 <b>），其余文本转义由用户自行控制；
+    # 这里只做最小处理：去掉首尾空白并保证与正文有空行分隔
+    sig = BRAND_SIGNATURE.strip()
+    if not sig:
+        return message
+    return f"{message.rstrip()}\n\n{sig}"
+
+
 def generate_telegram_message(repo: dict, readme_snippet: str, client: OpenAI) -> str:
     """使用 GitHub Models 生成深度硬核技术中文推荐文案（HTML 格式）"""
     name = repo.get("full_name", "") or "unknown"
@@ -103,7 +114,6 @@ def generate_telegram_message(repo: dict, readme_snippet: str, client: OpenAI) -
     stars = repo.get("stargazers_count", 0)
     language = repo.get("language") or "Unknown"
 
-    # 在 prompt 里用已转义的值，避免 AI 或特殊字符破坏结构
     safe_name = html.escape(name)
     safe_url = html.escape(html_url)
     safe_lang = html.escape(str(language))
@@ -175,10 +185,9 @@ def generate_telegram_message(repo: dict, readme_snippet: str, client: OpenAI) -
 
         if content and isinstance(content, str):
             content = content.strip()
-            # 简单清理 AI 可能残留的 Markdown 痕迹
             content = content.replace("**", "").replace("__", "")
             print(f"[Info] AI 成功为 {name} 生成深度中文 HTML 文案！")
-            return content
+            return append_brand_signature(content)
 
     except Exception as e:
         print(f"[Error] AI 生成文案发生异常: {e}")
@@ -186,7 +195,7 @@ def generate_telegram_message(repo: dict, readme_snippet: str, client: OpenAI) -
 
     # 安全保底输出（纯 HTML，动态内容已转义）
     safe_desc = html.escape(description)
-    return (
+    fallback = (
         f"🚀 <b>{safe_name}</b>\n"
         f"热门 GitHub 开源技术项目\n\n"
         f"🏷 标签：#{safe_lang} #开源推荐 #GitHub\n\n"
@@ -196,13 +205,13 @@ def generate_telegram_message(repo: dict, readme_snippet: str, client: OpenAI) -
         f"- 主要开发语言：{safe_lang}\n\n"
         f"🖥 <a href=\"{safe_url}\">点击查看项目源码</a>"
     )
+    return append_brand_signature(fallback)
 
 
 def send_telegram_message(token: str, chat_id: str, text: str) -> bool:
     """通过 Telegram Bot API 发送 HTML 消息，失败时降级为纯文本"""
     url = f"https://api.telegram.org/bot{token}/sendMessage"
 
-    # 优先 HTML
     payload_html = {
         "chat_id": chat_id,
         "text": text,
@@ -218,12 +227,9 @@ def send_telegram_message(token: str, chat_id: str, text: str) -> bool:
 
         print(f"[Warn] Telegram HTML 发送失败 ({resp.status_code}): {resp.text}")
 
-        # 降级：去掉常见 HTML 标签后以纯文本发送，避免整条消息丢失
         plain = text
         for tag in ("b", "strong", "i", "em", "u", "s", "code", "pre"):
             plain = plain.replace(f"<{tag}>", "").replace(f"</{tag}>", "")
-        # 粗暴处理 <a href="...">text</a> → text
-        import re
         plain = re.sub(r'<a\s+href="[^"]*">([^<]*)</a>', r"\1", plain, flags=re.IGNORECASE)
         plain = plain.replace("<", "<").replace(">", ">").replace("&", "&")
 
@@ -254,6 +260,10 @@ def main():
 
     print("=== GitHub 热门开源项目推送机器人 开始运行 ===")
     print(f"时间: {datetime.now(timezone.utc).isoformat()}")
+    if BRAND_SIGNATURE:
+        print("[Info] 已加载品牌签名（来自 BRAND_SIGNATURE Secret）")
+    else:
+        print("[Info] 未配置 BRAND_SIGNATURE，消息末尾不追加签名")
 
     try:
         client = OpenAI(
@@ -279,21 +289,17 @@ def main():
             full_name = repo.get("full_name", "unknown")
             print(f"\n正在处理项目: {full_name} (⭐ {repo.get('stargazers_count', 0)})")
 
-            # 1. 获取 README 原文辅助 AI
             readme_snippet = get_repo_readme(full_name, GH_TOKEN)
-
-            # 2. 生成深度中文 AI 文案（HTML）
             message = generate_telegram_message(repo, readme_snippet, client)
             print("--- 文案生成预览 ---")
             print(message)
             print("-------------------")
 
-            # 3. 发送至 Telegram
             success = send_telegram_message(TELEGRAM_BOT_TOKEN, TELEGRAM_CHANNEL_ID, message)
             if success:
                 pushed_ids.add(repo_id)
                 pushed_count += 1
-                time.sleep(2)  # 轻微限速，避免 Telegram 限流
+                time.sleep(2)
             else:
                 print(f"[Skip] 发送失败，跳过记录: {full_name}")
 
