@@ -38,6 +38,7 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          BRAND_SIGNATURE: ${{ secrets.BRAND_SIGNATURE }}
         run: |
           python main.py
 
