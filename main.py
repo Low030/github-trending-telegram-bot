@@ -118,6 +118,7 @@ def generate_telegram_message(repo: dict, readme_snippet: str, client: OpenAI) -
 4. 绝对不要使用 Markdown 语法（禁止 **、*、[]()、` 等）。
 5. 只能使用 Telegram HTML 标签：<b>、<i>、<a href="...">、<code>。不要使用其他标签。
 6. 正文中的 < 和 > 如果不是标签，请写成 < 和 >。
+7. 不要添加任何个人签名、品牌名、频道名或推广信息。
 
 【固定输出格式】（请严格按此结构输出，不要增加或删除段落标题）：
 
@@ -134,8 +135,6 @@ def generate_telegram_message(repo: dict, readme_snippet: str, client: OpenAI) -
 - 适用场景：支持的设备环境或使用方式。
 
 🖥 <a href="{safe_url}">点击查看项目源码</a>
-
-<b>野火 @YeHuoShare</b>
 
 ---
 【项目原始资料】：
@@ -158,7 +157,7 @@ def generate_telegram_message(repo: dict, readme_snippet: str, client: OpenAI) -
                         "你是一位优秀的硬核开源技术编辑。"
                         "你唯一的任务是输出高质量中文技术提炼文案。"
                         "必须使用 Telegram HTML 格式（<b>、<a href=\"...\"> 等），"
-                        "绝不能使用 Markdown，绝不包含通用废话。"
+                        "绝不能使用 Markdown，绝不包含通用废话，不要添加任何签名或品牌。"
                     )
                 },
                 {"role": "user", "content": prompt}
@@ -195,8 +194,7 @@ def generate_telegram_message(repo: dict, readme_snippet: str, client: OpenAI) -
         f"🟢 <b>项目介绍：</b>\n"
         f"- 关键功能：{safe_desc}\n"
         f"- 主要开发语言：{safe_lang}\n\n"
-        f"🖥 <a href=\"{safe_url}\">点击查看项目源码</a>\n\n"
-        f"<b>野火 @YeHuoShare</b>"
+        f"🖥 <a href=\"{safe_url}\">点击查看项目源码</a>"
     )
 
 
