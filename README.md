@@ -11,18 +11,22 @@
 - 每次最多推送 1–2 个新项目
 - 搜索时自动排除 fork，优先真正的新项目
 - HTML 解析失败时自动降级为纯文本，保证消息能发出
+- 个人/频道品牌签名通过 Secret 配置，不写进代码
 
 ## 配置步骤
 
 ### 1. 添加 GitHub Secrets
 
-进入仓库 **Settings → Secrets and variables → Actions**，添加以下三个 Secrets：
+进入仓库 **Settings → Secrets and variables → Actions**，添加以下 Secrets：
 
-| Secret 名称 | 说明 |
-|-------------|------|
-| `TELEGRAM_BOT_TOKEN` | Telegram Bot Token（从 @BotFather 获取） |
-| `TELEGRAM_CHANNEL_ID` | 目标频道 ID（例如 `-100xxxxxxxxxx`） |
-| `GH_TOKEN` | 你的 GitHub Personal Access Token（需要 `models:read` 权限，用于调用 GitHub Models） |
+| Secret 名称 | 说明 | 必填 |
+|-------------|------|------|
+| `TELEGRAM_BOT_TOKEN` | Telegram Bot Token（从 @BotFather 获取） | 是 |
+| `TELEGRAM_CHANNEL_ID` | 目标频道 ID（例如 `-100xxxxxxxxxx`） | 是 |
+| `GH_TOKEN` | 你的 GitHub Personal Access Token（需要 `models:read` 权限，用于调用 GitHub Models） | 是 |
+| `BRAND_SIGNATURE` | 消息末尾的个人/频道签名（支持简单 HTML，如 `<b>野火 @YeHuoShare</b>`） | 否 |
+
+未配置 `BRAND_SIGNATURE` 时，消息末尾不会追加任何签名。
 
 ### 2. 启用 GitHub Actions
 
@@ -46,8 +50,6 @@
 
 ## 消息格式示例
 
-机器人现在使用 Telegram HTML 模式发送，大致结构如下：
-
 ```
 🚀 <b>owner/repo</b>
 一句话核心亮点总结
@@ -62,6 +64,8 @@
 - 适用场景：...
 
 🖥 <a href="https://github.com/...">点击查看项目源码</a>
+
+<b>野火 @YeHuoShare</b>   ← 仅在配置了 BRAND_SIGNATURE 时出现
 ```
 
 ## 注意事项
