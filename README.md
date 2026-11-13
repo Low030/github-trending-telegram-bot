@@ -62,8 +62,6 @@
 - 适用场景：...
 
 🖥 <a href="https://github.com/...">点击查看项目源码</a>
-
-<b>野火 @YeHuoShare</b>
 ```
 
 ## 注意事项
