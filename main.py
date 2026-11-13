@@ -1,6 +1,7 @@
 import os
 import json
 import time
+import html
 import base64
 import traceback
 from datetime import datetime, timedelta, timezone
@@ -18,6 +19,10 @@ HISTORY_FILE = Path("pushed_history.json")
 MAX_PUSH_PER_RUN = 2
 MIN_STARS = 50
 DAYS_AGO = 30
+
+# Telegram 允许的 HTML 标签较有限，AI 输出后我们尽量只保留安全结构
+ALLOWED_HTML_TAGS = ("b", "strong", "i", "em", "u", "s", "code", "pre", "a")
+
 
 # ==================== 工具函数 ====================
 def load_history() -> set:
@@ -42,14 +47,16 @@ def save_history(pushed_ids: set):
 
 
 def get_github_trending_repos(token: str, days: int = 30, min_stars: int = 50) -> list:
-    """抓取近期创建且星数较高的开源项目"""
+    """抓取近期创建且星数较高的开源项目（排除 fork）"""
     since_date = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
-    query = f"created:>{since_date} stars:>={min_stars}"
+    # 排除 fork，优先真正的新项目
+    query = f"created:>{since_date} stars:>={min_stars} fork:false"
     url = "https://api.github.com/search/repositories"
     headers = {
         "Accept": "application/vnd.github+json",
         "Authorization": f"Bearer {token}",
-        "X-GitHub-Api-Version": "2022-11-28"
+        "X-GitHub-Api-Version": "2022-11-28",
+        "User-Agent": "github-trending-telegram-bot"
     }
     params = {
         "q": query,
@@ -74,7 +81,8 @@ def get_repo_readme(full_name: str, token: str) -> str:
     headers = {
         "Accept": "application/vnd.github+json",
         "Authorization": f"Bearer {token}",
-        "X-GitHub-Api-Version": "2022-11-28"
+        "X-GitHub-Api-Version": "2022-11-28",
+        "User-Agent": "github-trending-telegram-bot"
     }
     try:
         resp = requests.get(url, headers=headers, timeout=15)
@@ -88,12 +96,18 @@ def get_repo_readme(full_name: str, token: str) -> str:
 
 
 def generate_telegram_message(repo: dict, readme_snippet: str, client: OpenAI) -> str:
-    """使用 GitHub Models 生成深度硬核技术中文推荐文案"""
-    name = repo.get("full_name", "")
-    html_url = repo.get("html_url", "")
+    """使用 GitHub Models 生成深度硬核技术中文推荐文案（HTML 格式）"""
+    name = repo.get("full_name", "") or "unknown"
+    html_url = repo.get("html_url", "") or ""
     description = repo.get("description") or "暂无详细描述"
     stars = repo.get("stargazers_count", 0)
     language = repo.get("language") or "Unknown"
+
+    # 在 prompt 里用已转义的值，避免 AI 或特殊字符破坏结构
+    safe_name = html.escape(name)
+    safe_url = html.escape(html_url)
+    safe_lang = html.escape(str(language))
+    safe_stars = html.escape(str(stars))
 
     prompt = f"""你是一位极具专业洞察力的开源技术记者。请阅读提供的 GitHub 项目英文资料，深入提炼其【核心技术突破、底层原理与核心亮点】，用流畅地道的中文重新撰写 Telegram 推荐文案。
 
@@ -101,25 +115,27 @@ def generate_telegram_message(repo: dict, readme_snippet: str, client: OpenAI) -
 1. 绝对禁止照抄英文原文，绝对禁止使用英文截断符（...）。
 2. 绝对不能输出空洞套话（例如“该项目拥有较高关注度”、“值得关注”等废话）。
 3. 必须提炼出实质技术点：例如是“原生重构而非模拟器”、“利用物理架构优化”、“大幅提升帧率/渲染效率”等硬核核心。
-4. 绝对不要在正文段落前加 `>` 符号。
+4. 绝对不要使用 Markdown 语法（禁止 **、*、[]()、` 等）。
+5. 只能使用 Telegram HTML 标签：<b>、<i>、<a href="...">、<code>。不要使用其他标签。
+6. 正文中的 < 和 > 如果不是标签，请写成 < 和 >。
 
-【固定输出格式】：
+【固定输出格式】（请严格按此结构输出，不要增加或删除段落标题）：
 
-🚀 **{name}**
+🚀 <b>{safe_name}</b>
 用一句话中文炸裂总结该项目的核心黑科技与本质突破
 
-🏷 标签：#{language} #开源推荐 #GitHub热门
+🏷 标签：#{safe_lang} #开源推荐 #GitHub热门
 
-⭐ Star 数：{stars}
+⭐ Star 数：{safe_stars}
 
-🟢 **项目介绍：**
-- 核心突破：精准说明项目原理与底层技术创新（如：非模拟器、架构直出、API转译等）。
+🟢 <b>项目介绍：</b>
+- 核心突破：精准说明项目原理与底层技术创新。
 - 关键优势：性能、画质或效率的具体提升效果。
 - 适用场景：支持的设备环境或使用方式。
 
-🖥 [点击查看项目源码]({html_url})
+🖥 <a href="{safe_url}">点击查看项目源码</a>
 
-**野火 @YeHuoShare**
+<b>野火 @YeHuoShare</b>
 
 ---
 【项目原始资料】：
@@ -130,7 +146,7 @@ def generate_telegram_message(repo: dict, readme_snippet: str, client: OpenAI) -
 - README 核心片段：
 {readme_snippet if readme_snippet else "无"}
 
-请直接输出排版好的中文文案（不要包含任何思考过程或开场白）："""
+请直接输出排版好的中文 HTML 文案（不要包含任何思考过程或开场白）："""
 
     try:
         response = client.chat.completions.create(
@@ -138,7 +154,12 @@ def generate_telegram_message(repo: dict, readme_snippet: str, client: OpenAI) -
             messages=[
                 {
                     "role": "system",
-                    "content": "你是一位优秀的硬核开源技术编辑。你唯一的任务是输出高质量中文技术提炼文案，绝不包含通用废话，绝不包含 > 符号。"
+                    "content": (
+                        "你是一位优秀的硬核开源技术编辑。"
+                        "你唯一的任务是输出高质量中文技术提炼文案。"
+                        "必须使用 Telegram HTML 格式（<b>、<a href=\"...\"> 等），"
+                        "绝不能使用 Markdown，绝不包含通用废话。"
+                    )
                 },
                 {"role": "user", "content": prompt}
             ],
@@ -154,61 +175,73 @@ def generate_telegram_message(repo: dict, readme_snippet: str, client: OpenAI) -
                 content = getattr(msg, "content", None)
 
         if content and isinstance(content, str):
-            content = content.strip().replace("> ", "").replace(">", "")
-            print(f"[Info] AI 成功为 {name} 生成深度中文文案！")
+            content = content.strip()
+            # 简单清理 AI 可能残留的 Markdown 痕迹
+            content = content.replace("**", "").replace("__", "")
+            print(f"[Info] AI 成功为 {name} 生成深度中文 HTML 文案！")
             return content
 
     except Exception as e:
         print(f"[Error] AI 生成文案发生异常: {e}")
         traceback.print_exc()
 
-    # 安全保底输出（包含基本中文翻译指导）
+    # 安全保底输出（纯 HTML，动态内容已转义）
+    safe_desc = html.escape(description)
     return (
-        f"🚀 **{name}**\n"
+        f"🚀 <b>{safe_name}</b>\n"
         f"热门 GitHub 开源技术项目\n\n"
-        f"🏷 标签：#{language} #开源推荐 #GitHub\n\n"
-        f"⭐ Star 数：{stars}\n\n"
-        f"🟢 **项目介绍：**\n"
-        f"- 关键功能：{description}\n"
-        f"- 主要开发语言：{language}\n\n"
-        f"🖥 [点击查看项目源码]({html_url})\n\n"
-        f"**野火 @YeHuoShare**"
+        f"🏷 标签：#{safe_lang} #开源推荐 #GitHub\n\n"
+        f"⭐ Star 数：{safe_stars}\n\n"
+        f"🟢 <b>项目介绍：</b>\n"
+        f"- 关键功能：{safe_desc}\n"
+        f"- 主要开发语言：{safe_lang}\n\n"
+        f"🖥 <a href=\"{safe_url}\">点击查看项目源码</a>\n\n"
+        f"<b>野火 @YeHuoShare</b>"
     )
 
 
 def send_telegram_message(token: str, chat_id: str, text: str) -> bool:
-    """通过 Telegram Bot API 发送消息，具备强大的语法容错机制"""
+    """通过 Telegram Bot API 发送 HTML 消息，失败时降级为纯文本"""
     url = f"https://api.telegram.org/bot{token}/sendMessage"
-    
-    # 尝试 1：优先用 Markdown 格式发送
-    payload_md = {
+
+    # 优先 HTML
+    payload_html = {
         "chat_id": chat_id,
         "text": text,
-        "parse_mode": "Markdown",
+        "parse_mode": "HTML",
         "disable_web_page_preview": False
     }
-    
+
     try:
-        resp = requests.post(url, json=payload_md, timeout=20)
+        resp = requests.post(url, json=payload_html, timeout=20)
         if resp.status_code == 200:
-            print("[Success] 消息已成功推送到 Telegram (Markdown 模式)")
+            print("[Success] 消息已成功推送到 Telegram (HTML 模式)")
             return True
-        else:
-            print(f"[Warn] Telegram Markdown 发送失败 ({resp.status_code}): {resp.text}")
-            
-            # 尝试 2：如果 Markdown 报语法错误，降级为纯文本模式发送，防止程序报错崩溃
-            payload_plain = {
-                "chat_id": chat_id,
-                "text": text,
-                "disable_web_page_preview": False
-            }
-            resp_plain = requests.post(url, json=payload_plain, timeout=20)
-            if resp_plain.status_code == 200:
-                print("[Success] 消息以纯文本模式重新发送成功")
-                return True
-            else:
-                print(f"[Error] 纯文本模式发送也失败: {resp_plain.text}")
-                return False
+
+        print(f"[Warn] Telegram HTML 发送失败 ({resp.status_code}): {resp.text}")
+
+        # 降级：去掉常见 HTML 标签后以纯文本发送，避免整条消息丢失
+        plain = text
+        for tag in ("b", "strong", "i", "em", "u", "s", "code", "pre"):
+            plain = plain.replace(f"<{tag}>", "").replace(f"</{tag}>", "")
+        # 粗暴处理 <a href="...">text</a> → text
+        import re
+        plain = re.sub(r'<a\s+href="[^"]*">([^<]*)</a>', r"\1", plain, flags=re.IGNORECASE)
+        plain = plain.replace("<", "<").replace(">", ">").replace("&", "&")
+
+        payload_plain = {
+            "chat_id": chat_id,
+            "text": plain,
+            "disable_web_page_preview": False
+        }
+        resp_plain = requests.post(url, json=payload_plain, timeout=20)
+        if resp_plain.status_code == 200:
+            print("[Success] 消息以纯文本模式重新发送成功")
+            return True
+
+        print(f"[Error] 纯文本模式发送也失败: {resp_plain.text}")
+        return False
+
     except Exception as e:
         print(f"[Error] Telegram 请求发送异常: {e}")
         traceback.print_exc()
@@ -251,7 +284,7 @@ def main():
             # 1. 获取 README 原文辅助 AI
             readme_snippet = get_repo_readme(full_name, GH_TOKEN)
 
-            # 2. 生成深度中文 AI 文案
+            # 2. 生成深度中文 AI 文案（HTML）
             message = generate_telegram_message(repo, readme_snippet, client)
             print("--- 文案生成预览 ---")
             print(message)
@@ -262,7 +295,7 @@ def main():
             if success:
                 pushed_ids.add(repo_id)
                 pushed_count += 1
-                time.sleep(2)
+                time.sleep(2)  # 轻微限速，避免 Telegram 限流
             else:
                 print(f"[Skip] 发送失败，跳过记录: {full_name}")
 
